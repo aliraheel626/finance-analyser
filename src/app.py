@@ -83,27 +83,18 @@ class App:
                     ui.button('Edit Selected', on_click=self._edit_selected).bind_visibility_from(self, 'selected_rows', backward=lambda x: len(x) == 1)
                     ui.button('Delete Selected', on_click=self._delete_selected, color='red').bind_visibility_from(self, 'selected_rows', backward=lambda x: len(x) > 0)
 
-            # Table configuration
-            column_defs = [
-                {'headerName': 'ID', 'field': 'id', 'width': 70},
-                {'headerName': 'Date', 'field': 'booking_date_time', 'width': 120},
-                {'headerName': 'Description', 'field': 'bank_statement_description', 'flex': 1},
-                {'headerName': 'Debit', 'field': 'debit', 'width': 100, 'type': 'numericColumn'},
-                {'headerName': 'Credit', 'field': 'credit', 'width': 100, 'type': 'numericColumn'},
-                {'headerName': 'Category', 'field': 'category', 'width': 120, 'editable': True},
+            # Table configuration using ui.table
+            columns = [
+                {'name': 'id', 'label': 'ID', 'field': 'id', 'sortable': True, 'align': 'left'},
+                {'name': 'date', 'label': 'Date', 'field': 'booking_date_time', 'sortable': True, 'align': 'left'},
+                {'name': 'description', 'label': 'Description', 'field': 'bank_statement_description', 'sortable': True, 'align': 'left'},
+                {'name': 'debit', 'label': 'Debit', 'field': 'debit', 'sortable': True, 'align': 'right'},
+                {'name': 'credit', 'label': 'Credit', 'field': 'credit', 'sortable': True, 'align': 'right'},
+                {'name': 'category', 'label': 'Category', 'field': 'category', 'sortable': True, 'align': 'left'},
             ]
             
-            self.grid = ui.aggrid({
-                'columnDefs': column_defs,
-                'rowData': [],
-                'rowSelection': 'multiple',
-                'pagination': True,
-                'paginationPageSize': 20,
-                'theme': 'ag-theme-balham-dark',
-            }).classes('w-full grow h-[600px]')
-            
-            self.grid.on('selectionChanged', lambda e: setattr(self, 'selected_rows', e.args['selectedRows']))
-            self.grid.on('cellValueChanged', self._handle_cell_change)
+            self.table = ui.table(columns=columns, rows=[], row_key='id', selection='multiple', pagination=20).classes('w-full')
+            self.table.on('selection', lambda e: setattr(self, 'selected_rows', e.args[1]))
             
             self._load_transactions()
 
@@ -134,10 +125,12 @@ class App:
         return card
 
     # Logic Methods
-    def _handle_upload(self, e: events.UploadEventArguments):
+    async def _handle_upload(self, e: events.UploadEventArguments):
         """Process uploaded CSV."""
         try:
-            content = e.content.read().decode('utf-8')
+            # NiceGUI 3.5.0 uses e.file with async read() method
+            file_content = await e.file.read()
+            content = file_content.decode('utf-8')
             import tempfile
             import os
             with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
@@ -155,15 +148,18 @@ class App:
             ui.notify(f"Import failed: {ex}", type='negative')
 
     def _load_transactions(self):
-        """Fetch transactions and update grid."""
-        result = self.transaction_service.read_transactions(page_size=1000) # Load more for grid pagination
+        """Fetch transactions and update table."""
+        result = self.transaction_service.read_transactions(page_size=1000)
         data = result['transactions']
-        # Format dates for grid
+        print(f"[DEBUG] Loaded {len(data)} transactions")
+        # Format dates for table
         for d in data:
-            if isinstance(d['booking_date_time'], datetime):
+            if isinstance(d.get('booking_date_time'), datetime):
                 d['booking_date_time'] = d['booking_date_time'].strftime('%Y-%m-%d')
-        self.grid.options['rowData'] = data
-        self.grid.update()
+        # Update table rows
+        self.table.rows = data
+        self.table.update()
+        print(f"[DEBUG] Table rows set to {len(self.table.rows)} items")
 
     def _update_analytics(self):
         """Fetch stats and update visuals."""

@@ -56,7 +56,7 @@ class BankStatementProcessingService:
         # Parse transactions after header
         for row in rows[header_idx + 1 :]:
             # Skip empty rows or summary rows
-            if not row[0] or row[0].strip() == "":
+            if not row or not row[0] or row[0].strip() == "":
                 continue
 
             try:

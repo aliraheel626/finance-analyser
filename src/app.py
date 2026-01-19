@@ -1,13 +1,11 @@
-"""Budget Tracker GUI Application using ttkbootstrap."""
+"""Budget Tracker GUI Application using NiceGUI."""
 
-import tkinter as tk
+import io
 from datetime import datetime
-from tkinter import filedialog, messagebox
 from typing import Optional
 
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-from ttkbootstrap.tableview import Tableview
+import plotly.graph_objects as go
+from nicegui import events, ui
 
 from src.database import init_db
 from src.services import (
@@ -18,17 +16,11 @@ from src.services import (
 )
 
 
-class App(ttk.Window):
-    """Main application window."""
+class App:
+    """Main application frontend using NiceGUI."""
 
     def __init__(self):
         """Initialize the application."""
-        super().__init__(themename="darkly")
-
-        self.title("Budget Tracker")
-        self.geometry("1200x800")
-
-        # Initialize database
         init_db()
 
         # Initialize services
@@ -37,581 +29,229 @@ class App(ttk.Window):
         self.processing_service = BankStatementProcessingService()
         self.pipeline = TransactionPipeline()
 
-        # Current state
-        self.current_page = 1
-        self.page_size = 20
-        self.selected_transaction_id: Optional[int] = None
+        # UI State
+        self.selected_rows = []
+        
+        # Build UI
+        self._setup_styles()
+        self._build_ui()
 
-        # Create UI
-        self._create_notebook()
+    def _setup_styles(self):
+        """Setup custom styles and colors."""
+        ui.colors(primary='#38bdf8', secondary='#0ea5e9', accent='#0369a1')
+        ui.query('body').style('background-color: #0f172a; color: #f8fafc;')
 
-    def _create_notebook(self):
-        """Create the main notebook with tabs."""
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=BOTH, expand=YES, padx=10, pady=10)
+    def _build_ui(self):
+        """Construct the layout."""
+        with ui.header().classes('items-center justify-between bg-slate-900 border-b border-slate-700'):
+            ui.label('Budget Tracker').classes('text-2xl font-bold text-sky-400')
+            with ui.row().classes('items-center gap-4'):
+                ui.button('Refresh All', on_click=self.refresh_all, icon='refresh').props('flat color=white')
 
-        # Create tabs
-        self._create_import_tab()
-        self._create_transactions_tab()
-        self._create_dashboard_tab()
+        with ui.tabs().classes('w-full bg-slate-900 text-slate-400') as tabs:
+            self.import_tab = ui.tab('Import', icon='cloud_upload')
+            self.transactions_tab = ui.tab('Transactions', icon='list')
+            self.dashboard_tab = ui.tab('Dashboard', icon='dashboard')
 
-    def _create_import_tab(self):
-        """Create the CSV import tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Import CSV")
+        with ui.tab_panels(tabs, value=self.transactions_tab).classes('w-full grow bg-transparent'):
+            with ui.tab_panel(self.import_tab):
+                self._build_import_tab()
+            with ui.tab_panel(self.transactions_tab):
+                self._build_transactions_tab()
+            with ui.tab_panel(self.dashboard_tab):
+                self._build_dashboard_tab()
 
-        # Title
-        ttk.Label(
-            frame,
-            text="Import Bank Statement",
-            font=("Helvetica", 18, "bold"),
-        ).pack(pady=(0, 20))
+    def _build_import_tab(self):
+        """Build the CSV import section."""
+        with ui.column().classes('w-full max-w-2xl mx-auto items-center py-12 gap-6'):
+            ui.label('Import Bank Statement').classes('text-3xl font-bold')
+            ui.label('Select your bank statement CSV file to process and import transactions.').classes('text-slate-400 text-center')
+            
+            with ui.card().classes('w-full p-8 bg-slate-800 border border-slate-700'):
+                ui.upload(
+                    label='Upload CSV', 
+                    on_upload=self._handle_upload,
+                    auto_upload=True
+                ).props('accept=.csv').classes('w-full')
 
-        # File selection frame
-        file_frame = ttk.Frame(frame)
-        file_frame.pack(fill=X, pady=10)
+    def _build_transactions_tab(self):
+        """Build the transactions table section."""
+        with ui.column().classes('w-full grow p-4'):
+            with ui.row().classes('w-full items-center justify-between mb-4'):
+                ui.label('Recent Transactions').classes('text-2xl font-bold')
+                with ui.row().classes('gap-2'):
+                    ui.button('Edit Selected', on_click=self._edit_selected).bind_visibility_from(self, 'selected_rows', backward=lambda x: len(x) == 1)
+                    ui.button('Delete Selected', on_click=self._delete_selected, color='red').bind_visibility_from(self, 'selected_rows', backward=lambda x: len(x) > 0)
 
-        self.file_path_var = tk.StringVar()
-        ttk.Entry(
-            file_frame,
-            textvariable=self.file_path_var,
-            width=60,
-            state="readonly",
-        ).pack(side=LEFT, padx=(0, 10))
-
-        ttk.Button(
-            file_frame,
-            text="Select CSV",
-            command=self._select_csv_file,
-            bootstyle="primary",
-        ).pack(side=LEFT)
-
-        # Import button
-        ttk.Button(
-            frame,
-            text="Import Transactions",
-            command=self._import_transactions,
-            bootstyle="success",
-            width=20,
-        ).pack(pady=20)
-
-        # Status label
-        self.import_status_var = tk.StringVar(value="Select a CSV file to import")
-        ttk.Label(
-            frame,
-            textvariable=self.import_status_var,
-            font=("Helvetica", 12),
-        ).pack(pady=10)
-
-    def _select_csv_file(self):
-        """Open file dialog to select CSV file."""
-        file_path = filedialog.askopenfilename(
-            title="Select Bank Statement CSV",
-            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
-        )
-        if file_path:
-            self.file_path_var.set(file_path)
-            self.import_status_var.set("Ready to import")
-
-    def _import_transactions(self):
-        """Import transactions from selected CSV file."""
-        file_path = self.file_path_var.get()
-        if not file_path:
-            messagebox.showwarning("No File", "Please select a CSV file first.")
-            return
-
-        try:
-            result = self.pipeline.process(file_path, annotate=False)
-            self.import_status_var.set(
-                f"Imported {result['inserted']} new transactions "
-                f"(from {result['extracted']} total in file)"
-            )
-            messagebox.showinfo(
-                "Import Complete",
-                f"Successfully imported {result['inserted']} new transactions!",
-            )
-            # Refresh transactions view
-            self._load_transactions()
-            self._update_dashboard()
-        except Exception as e:
-            messagebox.showerror("Import Error", f"Error importing file: {e}")
-            self.import_status_var.set(f"Error: {e}")
-
-    def _create_transactions_tab(self):
-        """Create the transactions view tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Transactions")
-
-        # Title and controls frame
-        controls_frame = ttk.Frame(frame)
-        controls_frame.pack(fill=X, pady=(0, 10))
-
-        ttk.Label(
-            controls_frame,
-            text="Transactions",
-            font=("Helvetica", 18, "bold"),
-        ).pack(side=LEFT)
-
-        # Pagination controls
-        pagination_frame = ttk.Frame(controls_frame)
-        pagination_frame.pack(side=RIGHT)
-
-        ttk.Button(
-            pagination_frame,
-            text="← Previous",
-            command=self._prev_page,
-            bootstyle="secondary-outline",
-        ).pack(side=LEFT, padx=2)
-
-        self.page_label_var = tk.StringVar(value="Page 1 of 1")
-        ttk.Label(
-            pagination_frame,
-            textvariable=self.page_label_var,
-            width=15,
-        ).pack(side=LEFT, padx=10)
-
-        ttk.Button(
-            pagination_frame,
-            text="Next →",
-            command=self._next_page,
-            bootstyle="secondary-outline",
-        ).pack(side=LEFT, padx=2)
-
-        # Transactions table
-        columns = [
-            {"text": "ID", "stretch": False, "width": 50},
-            {"text": "Date", "stretch": False, "width": 100},
-            {"text": "Description", "stretch": True, "width": 300},
-            {"text": "Debit", "stretch": False, "width": 100},
-            {"text": "Credit", "stretch": False, "width": 100},
-            {"text": "Balance", "stretch": False, "width": 100},
-            {"text": "Category", "stretch": False, "width": 100},
-        ]
-
-        self.transactions_table = Tableview(
-            frame,
-            coldata=columns,
-            rowdata=[],
-            paginated=False,
-            searchable=True,
-            bootstyle="primary",
-            height=20,
-        )
-        self.transactions_table.pack(fill=BOTH, expand=YES)
-
-        # Bind selection event
-        self.transactions_table.view.bind("<<TreeviewSelect>>", self._on_row_select)
-
-        # Action buttons frame
-        actions_frame = ttk.Frame(frame)
-        actions_frame.pack(fill=X, pady=(10, 0))
-
-        ttk.Button(
-            actions_frame,
-            text="Edit Selected",
-            command=self._edit_transaction,
-            bootstyle="info",
-        ).pack(side=LEFT, padx=5)
-
-        ttk.Button(
-            actions_frame,
-            text="Delete Selected",
-            command=self._delete_transaction,
-            bootstyle="danger",
-        ).pack(side=LEFT, padx=5)
-
-        ttk.Button(
-            actions_frame,
-            text="Refresh",
-            command=self._load_transactions,
-            bootstyle="secondary",
-        ).pack(side=RIGHT, padx=5)
-
-        # Load initial data
-        self._load_transactions()
-
-    def _load_transactions(self):
-        """Load transactions into the table."""
-        try:
-            result = self.transaction_service.read_transactions(
-                page=self.current_page,
-                page_size=self.page_size,
-            )
-
-            # Update page label
-            self.page_label_var.set(
-                f"Page {result['page']} of {result['total_pages']}"
-            )
-
-            # Clear and reload table
-            self.transactions_table.delete_rows()
-
-            rows = []
-            for txn in result["transactions"]:
-                rows.append(
-                    (
-                        txn["id"],
-                        txn["booking_date_time"].strftime("%Y-%m-%d")
-                        if isinstance(txn["booking_date_time"], datetime)
-                        else str(txn["booking_date_time"])[:10],
-                        txn["bank_statement_description"][:50] + "..."
-                        if len(txn["bank_statement_description"]) > 50
-                        else txn["bank_statement_description"],
-                        f"{txn['debit']:.2f}" if txn["debit"] else "",
-                        f"{txn['credit']:.2f}" if txn["credit"] else "",
-                        f"{txn['available_balance']:.2f}",
-                        txn["category"] or "",
-                    )
-                )
-
-            self.transactions_table.insert_rows(END, rows)
-            self.transactions_table.load_table_data()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load transactions: {e}")
-
-    def _on_row_select(self, event):
-        """Handle row selection in transactions table."""
-        selection = self.transactions_table.view.selection()
-        if selection:
-            item = self.transactions_table.view.item(selection[0])
-            values = item.get("values", [])
-            if values:
-                self.selected_transaction_id = values[0]
-
-    def _prev_page(self):
-        """Go to previous page."""
-        if self.current_page > 1:
-            self.current_page -= 1
+            # Table configuration
+            column_defs = [
+                {'headerName': 'ID', 'field': 'id', 'width': 70},
+                {'headerName': 'Date', 'field': 'booking_date_time', 'width': 120},
+                {'headerName': 'Description', 'field': 'bank_statement_description', 'flex': 1},
+                {'headerName': 'Debit', 'field': 'debit', 'width': 100, 'type': 'numericColumn'},
+                {'headerName': 'Credit', 'field': 'credit', 'width': 100, 'type': 'numericColumn'},
+                {'headerName': 'Category', 'field': 'category', 'width': 120, 'editable': True},
+            ]
+            
+            self.grid = ui.aggrid({
+                'columnDefs': column_defs,
+                'rowData': [],
+                'rowSelection': 'multiple',
+                'pagination': True,
+                'paginationPageSize': 20,
+                'theme': 'ag-theme-balham-dark',
+            }).classes('w-full grow h-[600px]')
+            
+            self.grid.on('selectionChanged', lambda e: setattr(self, 'selected_rows', e.args['selectedRows']))
+            self.grid.on('cellValueChanged', self._handle_cell_change)
+            
             self._load_transactions()
 
-    def _next_page(self):
-        """Go to next page."""
-        result = self.transaction_service.read_transactions(
-            page=self.current_page,
-            page_size=self.page_size,
-        )
-        if self.current_page < result["total_pages"]:
-            self.current_page += 1
-            self._load_transactions()
+    def _build_dashboard_tab(self):
+        """Build the analytics dashboard."""
+        with ui.column().classes('w-full grow p-4 gap-6'):
+            ui.label('Financial Insights').classes('text-2xl font-bold')
+            
+            # Stats Cards
+            with ui.row().classes('w-full gap-4'):
+                self.income_card = self._stat_card('Total Income', '0.00', 'green-400')
+                self.expense_card = self._stat_card('Total Expenditure', '0.00', 'red-400')
+                self.ratio_card = self._stat_card('Savings Ratio', '0.00', 'blue-400')
+                self.forecast_card = self._stat_card('Monthly Forecast', '0.00', 'purple-400')
 
-    def _edit_transaction(self):
-        """Open dialog to edit selected transaction."""
-        if not self.selected_transaction_id:
-            messagebox.showwarning("No Selection", "Please select a transaction first.")
-            return
+            # Charts
+            with ui.row().classes('w-full gap-4'):
+                with ui.card().classes('grow p-4 bg-slate-800 border-slate-700'):
+                    ui.label('Expenditure by Category').classes('text-lg font-bold mb-4')
+                    self.pie_chart = ui.plotly({}).classes('w-full h-80')
 
-        # Get current transaction data
-        result = self.transaction_service.read_transactions(
-            transaction_id=self.selected_transaction_id
-        )
+            self._update_analytics()
 
-        if not result["transactions"]:
-            messagebox.showerror("Error", "Transaction not found.")
-            return
-
-        txn = result["transactions"][0]
-
-        # Create edit dialog
-        dialog = EditTransactionDialog(self, txn)
-        self.wait_window(dialog)
-
-        if dialog.result:
-            try:
-                self.transaction_service.update_transaction_by_id(
-                    self.selected_transaction_id, dialog.result
-                )
-                messagebox.showinfo("Success", "Transaction updated successfully!")
-                self._load_transactions()
-                self._update_dashboard()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to update: {e}")
-
-    def _delete_transaction(self):
-        """Delete selected transaction."""
-        if not self.selected_transaction_id:
-            messagebox.showwarning("No Selection", "Please select a transaction first.")
-            return
-
-        confirm = messagebox.askyesno(
-            "Confirm Delete",
-            "Are you sure you want to delete this transaction?",
-        )
-
-        if confirm:
-            try:
-                self.transaction_service.delete_transaction(
-                    self.selected_transaction_id
-                )
-                messagebox.showinfo("Success", "Transaction deleted successfully!")
-                self.selected_transaction_id = None
-                self._load_transactions()
-                self._update_dashboard()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to delete: {e}")
-
-    def _create_dashboard_tab(self):
-        """Create the analytics dashboard tab."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Dashboard")
-
-        # Title
-        ttk.Label(
-            frame,
-            text="Financial Dashboard",
-            font=("Helvetica", 18, "bold"),
-        ).pack(pady=(0, 20))
-
-        # Stats frame
-        stats_frame = ttk.Frame(frame)
-        stats_frame.pack(fill=X, pady=10)
-
-        # Create stat cards
-        self.stat_cards = {}
-
-        cards_data = [
-            ("total_income", "Total Income", "success"),
-            ("total_expenditure", "Total Expenditure", "danger"),
-            ("ratio", "Income/Expense Ratio", "info"),
-            ("avg_expense", "Average Expense", "warning"),
-        ]
-
-        for i, (key, label, style) in enumerate(cards_data):
-            card = self._create_stat_card(stats_frame, label, "0.00", style)
-            card.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")
-            self.stat_cards[key] = card
-            stats_frame.columnconfigure(i, weight=1)
-
-        # Expenditure stats frame
-        exp_stats_frame = ttk.LabelFrame(frame, text="Expenditure Statistics")
-        exp_stats_frame.pack(fill=X, pady=20)
-
-        self.exp_stats_labels = {}
-        exp_stats = [("min", "Minimum"), ("max", "Maximum"), ("std_dev", "Std Dev"), ("mean", "Mean")]
-
-        for i, (key, label) in enumerate(exp_stats):
-            ttk.Label(exp_stats_frame, text=f"{label}:").grid(
-                row=0, column=i * 2, padx=5, sticky="e"
-            )
-            value_label = ttk.Label(exp_stats_frame, text="0.00", font=("Helvetica", 12, "bold"))
-            value_label.grid(row=0, column=i * 2 + 1, padx=5, sticky="w")
-            self.exp_stats_labels[key] = value_label
-
-        # Monthly forecast frame
-        forecast_frame = ttk.LabelFrame(frame, text="Monthly Forecast")
-        forecast_frame.pack(fill=X, pady=10)
-
-        self.forecast_labels = {}
-        forecast_items = [
-            ("current", "Current Month Spent"),
-            ("daily_avg", "Daily Average"),
-            ("forecast", "Forecasted Total"),
-        ]
-
-        for i, (key, label) in enumerate(forecast_items):
-            ttk.Label(forecast_frame, text=f"{label}:").grid(
-                row=0, column=i * 2, padx=10, sticky="e"
-            )
-            value_label = ttk.Label(
-                forecast_frame, text="0.00", font=("Helvetica", 14, "bold")
-            )
-            value_label.grid(row=0, column=i * 2 + 1, padx=10, sticky="w")
-            self.forecast_labels[key] = value_label
-
-        # Refresh button
-        ttk.Button(
-            frame,
-            text="Refresh Dashboard",
-            command=self._update_dashboard,
-            bootstyle="primary",
-        ).pack(pady=20)
-
-        # Initial update
-        self._update_dashboard()
-
-    def _create_stat_card(
-        self, parent, title: str, value: str, style: str
-    ) -> ttk.Frame:
-        """Create a statistics card widget."""
-        card = ttk.Frame(parent)
-        card.configure(bootstyle=f"{style}")
-
-        ttk.Label(
-            card,
-            text=title,
-            font=("Helvetica", 10),
-        ).pack()
-
-        value_label = ttk.Label(
-            card,
-            text=value,
-            font=("Helvetica", 24, "bold"),
-        )
-        value_label.pack(pady=5)
-
-        # Store reference to value label for updates
-        card.value_label = value_label
-
+    def _stat_card(self, title: str, value: str, color: str):
+        with ui.card().classes(f'grow p-6 bg-slate-800 border border-slate-700 items-center justify-center') as card:
+            ui.label(title).classes('text-slate-400 uppercase text-xs tracking-wider')
+            card.value_label = ui.label(value).classes(f'text-3xl font-bold text-{color}')
         return card
 
-    def _update_dashboard(self):
-        """Update all dashboard statistics."""
+    # Logic Methods
+    def _handle_upload(self, e: events.UploadEventArguments):
+        """Process uploaded CSV."""
         try:
-            # Get totals
-            total_income = self.analytics_service.get_total_income()
-            total_exp = self.analytics_service.get_total_expenditure()
-            ratio = self.analytics_service.get_income_expenditure_ratio()
+            content = e.content.read().decode('utf-8')
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            
+            try:
+                result = self.pipeline.process(tmp_path, annotate=False)
+                ui.notify(f"Successfully imported {result['inserted']} new transactions!", type='positive')
+                self.refresh_all()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+        except Exception as ex:
+            ui.notify(f"Import failed: {ex}", type='negative')
 
-            # Update stat cards
-            self.stat_cards["total_income"].value_label.config(
-                text=f"{total_income:,.2f}"
-            )
-            self.stat_cards["total_expenditure"].value_label.config(
-                text=f"{total_exp:,.2f}"
-            )
-            self.stat_cards["ratio"].value_label.config(text=f"{ratio:.2f}")
+    def _load_transactions(self):
+        """Fetch transactions and update grid."""
+        result = self.transaction_service.read_transactions(page_size=1000) # Load more for grid pagination
+        data = result['transactions']
+        # Format dates for grid
+        for d in data:
+            if isinstance(d['booking_date_time'], datetime):
+                d['booking_date_time'] = d['booking_date_time'].strftime('%Y-%m-%d')
+        self.grid.options['rowData'] = data
+        self.grid.update()
 
-            # Get expenditure stats
-            exp_stats = self.analytics_service.get_expenditure_stats()
-            self.stat_cards["avg_expense"].value_label.config(
-                text=f"{exp_stats['mean']:,.2f}"
-            )
+    def _update_analytics(self):
+        """Fetch stats and update visuals."""
+        income = self.analytics_service.get_total_income()
+        expense = self.analytics_service.get_total_expenditure()
+        ratio = self.analytics_service.get_income_expenditure_ratio()
+        
+        now = datetime.now()
+        forecast = self.analytics_service.get_monthly_forecast(now.year, now.month)
 
-            for key in ["min", "max", "std_dev", "mean"]:
-                self.exp_stats_labels[key].config(text=f"{exp_stats[key]:,.2f}")
+        self.income_card.value_label.set_text(f"{income:,.2f}")
+        self.expense_card.value_label.set_text(f"{expense:,.2f}")
+        self.ratio_card.value_label.set_text(f"{ratio:.2f}")
+        self.forecast_card.value_label.set_text(f"{forecast['forecasted_total']:,.2f}")
 
-            # Get monthly forecast
-            now = datetime.now()
-            forecast = self.analytics_service.get_monthly_forecast(now.year, now.month)
-
-            self.forecast_labels["current"].config(
-                text=f"{forecast['current_total']:,.2f}"
-            )
-            self.forecast_labels["daily_avg"].config(
-                text=f"{forecast['daily_mean']:,.2f}"
-            )
-            self.forecast_labels["forecast"].config(
-                text=f"{forecast['forecasted_total']:,.2f}"
-            )
-
-        except Exception as e:
-            print(f"Error updating dashboard: {e}")
-
-
-class EditTransactionDialog(tk.Toplevel):
-    """Dialog for editing a transaction."""
-
-    def __init__(self, parent, transaction: dict):
-        """Initialize the edit dialog."""
-        super().__init__(parent)
-
-        self.title("Edit Transaction")
-        self.geometry("500x400")
-        self.transient(parent)
-        self.grab_set()
-
-        self.result = None
-        self.transaction = transaction
-
-        self._create_form()
-
-    def _create_form(self):
-        """Create the edit form."""
-        frame = ttk.Frame(self)
-        frame.pack(fill=BOTH, expand=YES)
-
-        # Description field
-        ttk.Label(frame, text="Description:").grid(row=0, column=0, sticky="w", pady=5)
-        self.description_var = tk.StringVar(
-            value=self.transaction.get("description") or ""
+        # Update Pie Chart
+        stats = self.analytics_service.get_percentile_breakdown()
+        cats = list(stats['expenditure_by_category'].keys())
+        vals = list(stats['expenditure_by_category'].values())
+        
+        fig = go.Figure(data=[go.Pie(labels=cats, values=vals, hole=.4)])
+        fig.update_layout(
+            margin=dict(t=0, b=0, l=0, r=0),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#f8fafc'),
+            showlegend=True
         )
-        ttk.Entry(frame, textvariable=self.description_var, width=40).grid(
-            row=0, column=1, pady=5, sticky="ew"
-        )
+        self.pie_chart.update_figure(fig)
 
-        # Category field
-        ttk.Label(frame, text="Category:").grid(row=1, column=0, sticky="w", pady=5)
-        self.category_var = tk.StringVar(
-            value=self.transaction.get("category") or ""
-        )
-        categories = [
-            "Food",
-            "Transport",
-            "Shopping",
-            "Bills",
-            "Transfer",
-            "Salary",
-            "Entertainment",
-            "ATM",
-            "Subscription",
-            "Government",
-            "Other",
-        ]
-        ttk.Combobox(
-            frame,
-            textvariable=self.category_var,
-            values=categories,
-            width=37,
-        ).grid(row=1, column=1, pady=5, sticky="ew")
+    async def _handle_cell_change(self, e):
+        """Handle inline edits in AG Grid."""
+        row_id = e.args['data']['id']
+        field = e.args['colId']
+        new_val = e.args['newValue']
+        
+        self.transaction_service.update_transaction_by_id(row_id, {field: new_val})
+        ui.notify(f"Updated {field} for transaction {row_id}")
+        self._update_analytics()
 
-        # Originator name field
-        ttk.Label(frame, text="Originator:").grid(row=2, column=0, sticky="w", pady=5)
-        self.originator_var = tk.StringVar(
-            value=self.transaction.get("originator_name") or ""
-        )
-        ttk.Entry(frame, textvariable=self.originator_var, width=40).grid(
-            row=2, column=1, pady=5, sticky="ew"
-        )
+    def _edit_selected(self):
+        """Open edit dialog for selected row."""
+        if not self.selected_rows: return
+        txn = self.selected_rows[0]
+        
+        with ui.dialog() as dialog, ui.card().classes('w-96'):
+            ui.label('Edit Transaction').classes('text-xl font-bold mb-4')
+            desc = ui.input('Description', value=txn['bank_statement_description']).classes('w-full')
+            cat = ui.select(['Food', 'Transport', 'Shopping', 'Bills', 'Transfer', 'Salary', 'Entertainment', 'ATM', 'Subscription', 'Government', 'Other'], 
+                           label='Category', value=txn['category']).classes('w-full')
+            
+            with ui.row().classes('w-full justify-end mt-4'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+                ui.button('Save', on_click=lambda: self._save_edit(txn['id'], desc.value, cat.value, dialog))
+        dialog.open()
 
-        # Group field
-        ttk.Label(frame, text="Group:").grid(row=3, column=0, sticky="w", pady=5)
-        self.group_var = tk.StringVar(
-            value=self.transaction.get("group_name") or ""
-        )
-        ttk.Entry(frame, textvariable=self.group_var, width=40).grid(
-            row=3, column=1, pady=5, sticky="ew"
-        )
+    def _save_edit(self, txn_id, desc, cat, dialog):
+        self.transaction_service.update_transaction_by_id(txn_id, {
+            'bank_statement_description': desc,
+            'category': cat
+        })
+        dialog.close()
+        ui.notify('Transaction updated')
+        self.refresh_all()
 
-        # Is taxes checkbox
-        self.is_taxes_var = tk.BooleanVar(
-            value=self.transaction.get("is_taxes", False)
-        )
-        ttk.Checkbutton(
-            frame,
-            text="Is Tax Transaction",
-            variable=self.is_taxes_var,
-            bootstyle="round-toggle",
-        ).grid(row=4, column=1, pady=10, sticky="w")
+    async def _delete_selected(self):
+        """Delete all selected rows."""
+        count = len(self.selected_rows)
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f'Are you sure you want to delete {count} transactions?').classes('text-lg')
+            with ui.row().classes('w-full justify-end'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+                ui.button('Delete', color='red', on_click=lambda: self._perform_delete(dialog))
+        dialog.open()
 
-        # Buttons
-        buttons_frame = ttk.Frame(frame)
-        buttons_frame.grid(row=5, column=0, columnspan=2, pady=20)
+    def _perform_delete(self, dialog):
+        for row in self.selected_rows:
+            self.transaction_service.delete_transaction(row['id'])
+        dialog.close()
+        self.selected_rows = []
+        ui.notify(f'Deleted transactions')
+        self.refresh_all()
 
-        ttk.Button(
-            buttons_frame,
-            text="Save",
-            command=self._save,
-            bootstyle="success",
-            width=15,
-        ).pack(side=LEFT, padx=10)
+    def refresh_all(self):
+        """Refresh all data views."""
+        self._load_transactions()
+        self._update_analytics()
 
-        ttk.Button(
-            buttons_frame,
-            text="Cancel",
-            command=self.destroy,
-            bootstyle="secondary",
-            width=15,
-        ).pack(side=LEFT, padx=10)
+# The UI is built during initialization of the App class.
+# NiceGUI elements are global, so we just need to instantiate the class.
 
-        frame.columnconfigure(1, weight=1)
-
-    def _save(self):
-        """Save the changes and close dialog."""
-        self.result = {
-            "description": self.description_var.get() or None,
-            "category": self.category_var.get() or None,
-            "originator_name": self.originator_var.get() or None,
-            "group_name": self.group_var.get() or None,
-            "is_taxes": self.is_taxes_var.get(),
-        }
-        self.destroy()

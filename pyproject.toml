@@ -3,8 +3,9 @@ name = "budget-tracker"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
+    "langchain-openai>=0.3.0",
     "pydantic-settings>=2.12.0",
     "sqlmodel>=0.0.31",
     "ttkbootstrap>=1.20.0",

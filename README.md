@@ -2,7 +2,7 @@
 
 # Stack
 - Language: Python
-- GUI: tkbootstrap
+- GUI: ttkbootstrap
 - Database: sqlite
 
 # Features

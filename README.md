@@ -16,7 +16,8 @@
 - sort transactions by date and order key
 
 # Architecture
-- GUI Layer, Service Layer, Data Access Layer
+- GUI Layer, Service Layer
+- All components are classes
 
 
 # Assumptions

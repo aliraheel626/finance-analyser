@@ -1,5 +1,9 @@
+from src.app import App
+
+
 def main():
-    print("Hello from budget-tracker!")
+    app = App()
+    app.mainloop()
 
 
 if __name__ == "__main__":

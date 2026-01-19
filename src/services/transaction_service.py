@@ -24,6 +24,7 @@ class TransactionService:
         name: Optional[str] = None,
         transaction_id: Optional[int] = None,
         include_taxes_nested: bool = True,
+        only_annotated: bool = False,
     ) -> dict[str, Any]:
         """
         Read transactions with filtering, sorting, and pagination.
@@ -54,6 +55,9 @@ class TransactionService:
                 query = query.where(Transaction.originator_name.ilike(f"%{name}%"))
             if transaction_id:
                 query = query.where(Transaction.id == transaction_id)
+            if only_annotated:
+                query = query.where(Transaction.description.isnot(None))
+                query = query.where(Transaction.category.isnot(None))
 
             # Get total count
             count_query = select(Transaction)
@@ -69,6 +73,9 @@ class TransactionService:
                 )
             if category:
                 count_query = count_query.where(Transaction.category == category)
+            if only_annotated:
+                count_query = count_query.where(Transaction.description.isnot(None))
+                count_query = count_query.where(Transaction.category.isnot(None))
 
             all_for_count = session.exec(count_query).all()
             total = len(all_for_count)

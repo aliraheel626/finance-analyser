@@ -78,16 +78,18 @@ class App:
         """Build the transactions table section."""
         with ui.column().classes('w-full grow p-4'):
             with ui.row().classes('w-full items-center justify-between mb-4'):
-                ui.label('Recent Transactions').classes('text-2xl font-bold')
+                ui.label('Annotated Transactions').classes('text-2xl font-bold')
                 with ui.row().classes('gap-2'):
+                    ui.button('Annotate All', on_click=self._annotate_all, color='primary').props('icon=auto_fix_high')
                     ui.button('Edit Selected', on_click=self._edit_selected).bind_visibility_from(self, 'selected_rows', backward=lambda x: len(x) == 1)
                     ui.button('Delete Selected', on_click=self._delete_selected, color='red').bind_visibility_from(self, 'selected_rows', backward=lambda x: len(x) > 0)
 
-            # Table configuration using ui.table
+            # Table configuration using ui.table - shows annotated transactions
             columns = [
                 {'name': 'id', 'label': 'ID', 'field': 'id', 'sortable': True, 'align': 'left'},
                 {'name': 'date', 'label': 'Date', 'field': 'booking_date_time', 'sortable': True, 'align': 'left'},
-                {'name': 'description', 'label': 'Description', 'field': 'bank_statement_description', 'sortable': True, 'align': 'left'},
+                {'name': 'description', 'label': 'Description', 'field': 'description', 'sortable': True, 'align': 'left'},
+                {'name': 'originator', 'label': 'Merchant/Person', 'field': 'originator_name', 'sortable': True, 'align': 'left'},
                 {'name': 'debit', 'label': 'Debit', 'field': 'debit', 'sortable': True, 'align': 'right'},
                 {'name': 'credit', 'label': 'Credit', 'field': 'credit', 'sortable': True, 'align': 'right'},
                 {'name': 'category', 'label': 'Category', 'field': 'category', 'sortable': True, 'align': 'left'},
@@ -148,10 +150,10 @@ class App:
             ui.notify(f"Import failed: {ex}", type='negative')
 
     def _load_transactions(self):
-        """Fetch transactions and update table."""
-        result = self.transaction_service.read_transactions(page_size=1000)
+        """Fetch only annotated transactions and update table."""
+        result = self.transaction_service.read_transactions(page_size=1000, only_annotated=True)
         data = result['transactions']
-        print(f"[DEBUG] Loaded {len(data)} transactions")
+        print(f"[DEBUG] Loaded {len(data)} annotated transactions")
         # Format dates for table
         for d in data:
             if isinstance(d.get('booking_date_time'), datetime):
@@ -159,7 +161,22 @@ class App:
         # Update table rows
         self.table.rows = data
         self.table.update()
-        print(f"[DEBUG] Table rows set to {len(self.table.rows)} items")
+
+    async def _annotate_all(self):
+        """Annotate all unannotated transactions using AI in background."""
+        ui.notify("Starting annotation... This may take a while.", type='info')
+        try:
+            from src.services.annotation_service import TransactionAnnotationService
+            annotation_service = TransactionAnnotationService()
+            
+            # Run in background thread to prevent UI blocking
+            import asyncio
+            count = await asyncio.to_thread(annotation_service.annotate_all_unannotated)
+            
+            ui.notify(f"Successfully annotated {count} transactions!", type='positive')
+            self.refresh_all()
+        except Exception as ex:
+            ui.notify(f"Annotation failed: {ex}", type='negative')
 
     def _update_analytics(self):
         """Fetch stats and update visuals."""

@@ -1,4 +1,4 @@
-"""Budget Tracker GUI Application using NiceGUI."""
+"""Finance Analyser GUI Application using NiceGUI."""
 
 import io
 from datetime import datetime
@@ -44,7 +44,7 @@ class App:
     def _build_ui(self):
         """Construct the layout."""
         with ui.header().classes('items-center justify-between bg-slate-900 border-b border-slate-700'):
-            ui.label('Budget Tracker').classes('text-2xl font-bold text-sky-400')
+            ui.label('Finance Analyser').classes('text-2xl font-bold text-sky-400')
             with ui.row().classes('items-center gap-4'):
                 ui.button('Refresh All', on_click=self.refresh_all, icon='refresh').props('flat color=white')
 

@@ -1,4 +1,4 @@
-"""Models package for the budget tracker."""
+"""Models package for the Finance Analyser."""
 
 from src.models.transaction import Transaction
 

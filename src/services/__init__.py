@@ -1,4 +1,4 @@
-"""Services package for the budget tracker."""
+"""Services package for the Finance Analyser."""
 
 from src.services.analytics_service import AnalyticsService
 from src.services.annotation_service import TransactionAnnotationService

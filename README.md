@@ -1,4 +1,4 @@
-# Budget Tracker
+# Finance Analyser
 
 # Stack
 - Language: Python

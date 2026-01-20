@@ -1,4 +1,4 @@
-"""Transaction model for the budget tracker."""
+"""Transaction model for the Finance Analyser."""
 
 from datetime import datetime
 from typing import Optional

@@ -7,7 +7,7 @@ def main():
     
     # Run NiceGUI
     ui.run(
-        title="Budget Tracker",
+        title="Finance Analyser",
         native=True,  # Let's try native again with the standard setup
         port=8081,
         window_size=(1400, 900)

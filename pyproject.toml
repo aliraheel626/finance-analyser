@@ -1,7 +1,7 @@
 [project]
-name = "budget-tracker"
+name = "finance_analyser"
 version = "0.1.0"
-description = "Add your description here"
+description = "Application to track expenses and generate insights"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
